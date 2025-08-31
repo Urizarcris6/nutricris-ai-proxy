@@ -1,31 +1,41 @@
 // api/gemini-proxy.js
 export default async function handler(req, res) {
-  // --- CORS (autoriza tu dominio) ---
+  // --- CORS ---
   const ALLOWED = [
     "https://nutricris.lat",
     "https://www.nutricris.lat",
-    "http://localhost:5500", // quítalo cuando acabes de probar en local
+    "http://localhost:5500", // quítalo cuando termines de probar
   ];
-  const origin = req.headers.origin;
-  if (ALLOWED.includes(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
-  else res.setHeader("Access-Control-Allow-Origin", "https://nutricris.lat");
+  const origin = req.headers.origin || "";
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    ALLOWED.includes(origin) ? origin : "https://nutricris.lat"
+  );
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS,GET");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-
-  // GET para “health check” en el navegador
   if (req.method === "GET") {
     return res.status(200).json({ ok: true, message: "Gemini proxy up" });
   }
-
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
+  // --- Lee y parsea el body JSON ---
+  let body = {};
   try {
-    const { payload } = req.body || {};
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    // si falla el parseo, body queda {}
+  }
+
+  try {
+    const { payload } = body || {};
     if (!payload) return res.status(400).json({ error: "Missing payload" });
 
     const apiKey = process.env.GEMINI_API_KEY;
