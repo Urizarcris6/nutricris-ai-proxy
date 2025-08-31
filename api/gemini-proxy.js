@@ -16,9 +16,17 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
+
+  // --- GET para probar en el navegador (AQUÍ VA EL CAMBIO) ---
   if (req.method === "GET") {
-    return res.status(200).json({ ok: true, message: "Gemini proxy up" });
+    return res.status(200).json({
+      ok: true,
+      message: "Gemini proxy up",
+      hasKey: !!process.env.GEMINI_API_KEY,   // <- indica si el runtime ve la key
+      env: process.env.VERCEL_ENV || "unknown"
+    });
   }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
@@ -65,4 +73,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Proxy failure" });
   }
 }
+
 
