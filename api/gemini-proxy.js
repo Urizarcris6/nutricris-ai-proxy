@@ -4,7 +4,6 @@ export default async function handler(req, res) {
   const ALLOWED = [
     "https://nutricris.lat",
     "https://www.nutricris.lat",
-    "http://localhost:5500", // quítalo cuando termines de probar
   ];
   const origin = req.headers.origin || "";
   res.setHeader(
