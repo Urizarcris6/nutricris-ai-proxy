@@ -1,70 +1,77 @@
-const PROXY_URL = "https://nutricris-ai-proxy.vercel.app/api/gemini-proxy";
+// api/gemini-proxy.js
+export default async function handler(req, res) {
+  // --- CORS ---
+  const ALLOWED = ["https://nutricris.lat", "https://www.nutricris.lat"];
+  const origin = req.headers.origin || "";
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED.includes(origin) ? origin : "https://nutricris.lat");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS,GET");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-// Helper reutilizable (igual filosofía que en tus calculadoras)
-async function askGemini(prompt) {
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { maxOutputTokens: 350, temperature: 0.7, topP: 0.95, topK: 40 },
-  };
+  if (req.method === "OPTIONS") return res.status(200).end();
 
-  const res = await fetch(PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ payload }),
-  });
-
-  // Intenta parsear JSON siempre
-  let data = {};
-  try { data = await res.json(); } catch (_) {}
-
-  if (!res.ok) {
-    const msg = data?.error?.error?.message || data?.error?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
+  // GET: healthcheck + confirma si el runtime ve la key
+  if (req.method === "GET") {
+    return res.status(200).json({
+      ok: true,
+      message: "Gemini proxy up",
+      hasKey: !!process.env.GEMINI_API_KEY,
+      env: process.env.VERCEL_ENV || "unknown",
+    });
   }
 
-  // Extrae texto con fallback al RAW
-  const text =
-    (data?.text || (data?.raw?.candidates?.[0]?.content?.parts || [])
-      .map(p => (typeof p?.text === "string" ? p.text : ""))
-      .join("\n")).trim();
-
-  if (!text) {
-    throw new Error(data?.note || "Respuesta vacía del modelo");
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  console.debug("Gemini result:", data); // <-- útil en Network/Console
-  return text;
-}
-
-const handleSendMessage = async () => {
-  const userMessage = userInput.value;
-  if (!userMessage || !userMessage.trim()) return;
-
-  appendMessage(userMessage.trim(), "user");
-  userInput.value = "";
-  autoResize(userInput);
-  appendTyping();
-
-  const prompt = `Eres un asistente de nutrición amable y profesional para el sitio de Nut. Cristian.
-Responde en español neutro.
-REGLAS:
-- No des diagnósticos médicos ni prescribas tratamientos.
-- Si la pregunta no es de nutrición/bienestar, dilo amablemente.
-- Extensión: 4–7 frases (≈80–150 palabras). Si ayuda, agrega una lista breve (máx. 5 puntos).
-- Cierra con una “siguiente acción” simple (p.ej., beber agua, revisar etiquetas o agendar consulta).
-
-Pregunta del usuario: "${userMessage}"`;
+  // --- Lee body JSON de forma segura ---
+  let bodyText = "";
+  try { for await (const chunk of req) bodyText += chunk; } catch {}
+  let body = {};
+  try { body = bodyText ? JSON.parse(bodyText) : {}; } catch {}
 
   try {
-    const reply = await askGemini(prompt);
-    removeTyping();
-    appendMessage(reply, "ai");
+    const { payload } = body || {};
+    if (!payload) return res.status(400).json({ error: "Missing payload" });
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "Missing GEMINI_API_KEY" });
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+    const upstream = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await upstream.json();
+
+    if (!upstream.ok) {
+      console.error("Gemini upstream error:", data);
+      return res.status(upstream.status).json({ error: data, where: "upstream" });
+    }
+
+    // --- EXTRAER TEXTO DE FORMA RESILIENTE ---
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const text = parts
+      .map(p => (typeof p?.text === "string" ? p.text : ""))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    // Si no hubo texto, devolvemos una nota útil
+    const note = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || "empty_text";
+    if (!text) {
+      return res.status(200).json({ text: "", raw: data, note });
+    }
+
+    return res.status(200).json({ text, raw: data });
   } catch (err) {
-    console.error("AI error:", err);
-    removeTyping();
-    appendMessage("Lo siento, hubo un problema. Intenta de nuevo.", "ai");
+    console.error("Proxy error:", err);
+    return res.status(500).json({ error: "Proxy failure" });
   }
-};
+}
 
 
 
