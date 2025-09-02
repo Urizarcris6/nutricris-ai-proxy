@@ -16,13 +16,13 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  // --- GET para probar en el navegador (AQUÍ VA EL CAMBIO) ---
+  // --- GET: health check (para probar en el navegador) ---
   if (req.method === "GET") {
     return res.status(200).json({
       ok: true,
       message: "Gemini proxy up",
-      hasKey: !!process.env.GEMINI_API_KEY,   // <- indica si el runtime ve la key
-      env: process.env.VERCEL_ENV || "unknown"
+      hasKey: !!process.env.GEMINI_API_KEY,
+      env: process.env.VERCEL_ENV || "unknown",
     });
   }
 
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  // --- Lee y parsea el body JSON ---
+  // --- Lee y parsea el body JSON (soporta streaming) ---
   let body = {};
   try {
     const chunks = [];
@@ -65,12 +65,38 @@ export default async function handler(req, res) {
       return res.status(upstream.status).json({ error: data });
     }
 
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    // --- Extrae texto uniendo todas las parts y con fallbacks ---
+    function extractText(g) {
+      try {
+        const candidates = g?.candidates || [];
+        for (const c of candidates) {
+          const parts = c?.content?.parts || [];
+          const joined = parts
+            .map(p => (typeof p?.text === "string" ? p.text : ""))
+            .join("")
+            .trim();
+          if (joined) return joined;
+        }
+        return g?.output_text || g?.text || "";
+      } catch {
+        return "";
+      }
+    }
+
+    const text = extractText(data);
+    if (!text) {
+      console.error(
+        "Gemini: respuesta sin texto. Dump corto:",
+        JSON.stringify(data).slice(0, 500)
+      );
+    }
+
     return res.status(200).json({ text, raw: data });
   } catch (err) {
     console.error("Proxy error:", err);
     return res.status(500).json({ error: "Proxy failure" });
   }
 }
+
 
 
