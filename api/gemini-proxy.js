@@ -24,20 +24,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  // --- Lee body JSON de forma segura ---
-  let bodyText = "";
-  try { for await (const chunk of req) bodyText += chunk; } catch {}
-  let body = {};
-  try { body = bodyText ? JSON.parse(bodyText) : {}; } catch {}
-
   try {
+    // Vercel normalmente ya parsea el JSON en req.body automáticamente
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
+
     const { payload } = body || {};
     if (!payload) return res.status(400).json({ error: "Missing payload" });
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "Missing GEMINI_API_KEY" });
 
-const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    // API actualizada al modelo 3 Flash Preview con endpoint v1beta
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
     const upstream = await fetch(url, {
       method: "POST",
@@ -72,7 +73,6 @@ const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flas
     return res.status(500).json({ error: "Proxy failure" });
   }
 }
-
 
 
 
